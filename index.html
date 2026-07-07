@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ドローンおとどけ便</title>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#1a2340; touch-action:none; overscroll-behavior:none; position:fixed; }
+  body { font-family:'BIZ UDPGothic', sans-serif; color:#fff; }
+  canvas { display:block; }
+
+  /* ===== 上部HUD ===== */
+  #hud {
+    position:fixed; top:0; left:0; right:0; z-index:10;
+    display:none; align-items:center; gap:10px;
+    padding:calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px 12px;
+    pointer-events:none;
+  }
+  .hudBox {
+    background:rgba(20,28,58,.78); border:2px solid rgba(255,255,255,.25);
+    border-radius:14px; padding:6px 12px; font-size:15px; font-weight:700;
+    display:flex; align-items:center; gap:8px; min-height:44px;
+  }
+  #battWrap { flex:1; max-width:340px; }
+  #battBar { flex:1; height:14px; background:rgba(255,255,255,.18); border-radius:7px; overflow:hidden; }
+  #battFill { height:100%; width:100%; background:linear-gradient(90deg,#42e07a,#a8f066); border-radius:7px; transition:width .2s linear; }
+  #battWrap.warn #battFill { background:#ff5252; }
+  #battWrap.warn { animation:flash .5s infinite alternate; }
+  @keyframes flash { from { border-color:rgba(255,255,255,.25);} to { border-color:#ff5252; background:rgba(120,20,20,.85);} }
+  #battSec { min-width:44px; text-align:right; font-variant-numeric:tabular-nums; }
+  .fdot { font-size:18px; letter-spacing:2px; color:#ffd94d; }
+  #cargoChip { width:20px; height:20px; border-radius:6px; background:#666; border:2px solid #fff3; }
+
+  /* ===== 視点切り替えボタン ===== */
+  #viewBtn {
+    position:fixed; right:12px; top:calc(env(safe-area-inset-top, 0px) + 64px); z-index:11;
+    min-width:88px; min-height:52px; border-radius:16px; border:2px solid #fff5;
+    background:rgba(38,52,96,.85); color:#fff; font-family:inherit; font-weight:700; font-size:15px;
+    display:none; align-items:center; justify-content:center; gap:4px;
+  }
+  #viewBtn:active { background:rgba(80,110,190,.9); }
+
+  /* ===== 仮想スティック ===== */
+  .stickZone {
+    position:fixed; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px); z-index:9;
+    width:170px; height:170px; border-radius:50%;
+    background:rgba(255,255,255,.07); border:2px dashed rgba(255,255,255,.28);
+    display:none;
+  }
+  #stickL { left:20px; } #stickR { right:20px; }
+  .stickKnob {
+    position:absolute; left:50%; top:50%; width:72px; height:72px; margin:-36px 0 0 -36px;
+    border-radius:50%; background:radial-gradient(circle at 32% 30%, #8fb3ff, #3a5fbf 70%);
+    border:3px solid rgba(255,255,255,.7); box-shadow:0 4px 12px rgba(0,0,0,.4);
+  }
+  .stickLabel { position:absolute; width:100%; text-align:center; top:-28px; font-size:12px; color:#cfe0ff; font-weight:700; text-shadow:0 1px 3px #000; }
+
+  /* ===== オーバーレイ共通 ===== */
+  .overlay {
+    position:fixed; inset:0; z-index:20; display:none;
+    align-items:center; justify-content:center; flex-direction:column; gap:22px;
+    background:rgba(10,15,35,.72); text-align:center; padding:24px;
+  }
+  .bigTitle { font-size:min(9vw,52px); font-weight:700; text-shadow:0 3px 0 #1b2a5e, 0 6px 18px rgba(0,0,0,.5); }
+  .subText { font-size:17px; line-height:1.8; color:#dfe8ff; }
+  .bigBtn {
+    min-width:220px; min-height:64px; font-family:inherit; font-size:22px; font-weight:700;
+    color:#25321c; background:linear-gradient(#b8f57e,#6fd94a); border:none; border-radius:20px;
+    box-shadow:0 6px 0 #3e8f2a, 0 10px 20px rgba(0,0,0,.4); cursor:pointer;
+  }
+  .bigBtn:active { transform:translateY(4px); box-shadow:0 2px 0 #3e8f2a; }
+
+  /* ===== 信号機 ===== */
+  #signalBox { display:flex; gap:22px; background:#222a; padding:20px 30px; border-radius:24px; border:3px solid #555; }
+  .lamp { width:min(16vw,84px); height:min(16vw,84px); border-radius:50%; background:#333; transition:all .15s; }
+  .lamp.red.on { background:#ff3b30; box-shadow:0 0 40px 10px #ff3b3088; }
+  .lamp.yel.on { background:#ffd60a; box-shadow:0 0 40px 10px #ffd60a88; }
+  .lamp.grn.on { background:#34e05e; box-shadow:0 0 40px 10px #34e05e88; }
+  #signalOverlay { background:transparent; pointer-events:none; }
+
+  /* ===== 充電 ===== */
+  #chargeBarWrap { width:min(70vw,360px); height:26px; background:rgba(255,255,255,.15); border-radius:13px; overflow:hidden; border:2px solid #fff4; }
+  #chargeBarFill { height:100%; width:0%; background:linear-gradient(90deg,#ffd94d,#7cf06a); }
+  .bolt { font-size:56px; animation:boltP 1s infinite alternate; }
+  @keyframes boltP { from{transform:scale(1);} to{transform:scale(1.25);} }
+
+  /* ===== クリア文字 ===== */
+  #clearTitle {
+    font-size:min(11vw,64px); font-weight:700;
+    background:linear-gradient(90deg,#ffd94d,#ff7ac8,#7cf0ff,#ffd94d); background-size:300% 100%;
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    animation:rainbow 2.5s linear infinite, popin .6s cubic-bezier(.2,1.6,.4,1);
+    text-shadow:none; filter:drop-shadow(0 4px 8px rgba(0,0,0,.6));
+  }
+  @keyframes rainbow { to { background-position:300% 0; } }
+  @keyframes popin { from { transform:scale(.2) rotate(-8deg); opacity:0; } to { transform:scale(1) rotate(0); opacity:1; } }
+  .resultRow { font-size:20px; background:rgba(20,30,60,.8); border-radius:14px; padding:12px 26px; border:2px solid #fff3; }
+
+  /* ===== トースト（色ちがい警告など） ===== */
+  #toast {
+    position:fixed; top:32%; left:50%; transform:translateX(-50%); z-index:15;
+    background:rgba(180,40,40,.92); border:2px solid #fff8; border-radius:16px;
+    padding:12px 24px; font-size:20px; font-weight:700; display:none; pointer-events:none;
+    box-shadow:0 6px 18px rgba(0,0,0,.5);
+  }
+  #toast.info { background:rgba(40,120,190,.92); }
+</style>
+</head>
+<body>
+
+<!-- ===== HUD ===== -->
+<div id="hud">
+  <div class="hudBox" id="battWrap">🔋<div id="battBar"><div id="battFill"></div></div><span id="battSec">60</span></div>
+  <div class="hudBox">✈️ <span class="fdot" id="flightDots">●●●</span></div>
+  <div class="hudBox">📦 <span id="cargoChip"></span><span id="cargoName">なし</span></div>
+</div>
+<button id="viewBtn">📷 三人称</button>
+
+<!-- ===== 仮想スティック ===== -->
+<div class="stickZone" id="stickL"><div class="stickLabel">上下・回転</div><div class="stickKnob" id="knobL"></div></div>
+<div class="stickZone" id="stickR"><div class="stickLabel">前後・左右</div><div class="stickKnob" id="knobR"></div></div>
+
+<!-- ===== スタート画面 ===== -->
+<div class="overlay" id="startScreen" style="display:flex;">
+  <div class="bigTitle">🚁 ドローンおとどけ便</div>
+  <div class="subText">
+    2つの荷物を <b>同じ色の場所</b> にとどけよう！<br>
+    荷物や届け先には <b>ゆっくり近づく</b> と自動でつかむ・置くよ。<br>
+    バッテリーは1回 <b>60秒</b>・とべるのは <b>3回</b> まで。<br>
+    全部とどけたら、スタート地点にもどって着陸！
+  </div>
+  <button class="bigBtn" id="startBtn">スタート</button>
+</div>
+
+<!-- ===== 信号機 ===== -->
+<div class="overlay" id="signalOverlay">
+  <div id="signalBox">
+    <div class="lamp red" id="lampR"></div>
+    <div class="lamp yel" id="lampY"></div>
+    <div class="lamp grn" id="lampG"></div>
+  </div>
+</div>
+
+<!-- ===== 充電 ===== -->
+<div class="overlay" id="chargeOverlay">
+  <div class="bolt">⚡</div>
+  <div class="bigTitle" style="font-size:32px;">充電中…</div>
+  <div id="chargeBarWrap"><div id="chargeBarFill"></div></div>
+</div>
+
+<!-- ===== クリア ===== -->
+<div class="overlay" id="clearOverlay">
+  <div id="clearTitle">ミッションコンプリート！</div>
+  <div class="resultRow">つかった飛行回数：<b id="resFlights"></b> / 3</div>
+  <div class="resultRow">合計飛行タイム：<b id="resTime"></b></div>
+  <button class="bigBtn" id="againBtn">もう一度あそぶ（別コース）</button>
+</div>
+
+<!-- ===== ゲームオーバー ===== -->
+<div class="overlay" id="overOverlay">
+  <div class="bigTitle" style="color:#ffb0b0;">バッテリー切れ…</div>
+  <div class="subText">3回のフライトを使い切ったよ。<br>もう一度チャレンジしよう！</div>
+  <button class="bigBtn" id="retryBtn" style="background:linear-gradient(#ffd27e,#f0a24a); box-shadow:0 6px 0 #b06f22, 0 10px 20px rgba(0,0,0,.4);">リトライ</button>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
+
+/* =========================================================
+   ドローンおとどけ便
+   - Three.js + cannon-es / 単一HTML / iPad Safari最優先
+   - dtクランプで120Hz対応、全音声はWeb Audio API合成
+   ========================================================= */
+
+// ---------- 定数（あとから調整しやすいようにまとめる） ----------
+const CFG = {
+  flightSeconds: 60,       // 1フライトの時間
+  maxFlights: 3,           // 最大飛行回数
+  warnAt: 10,              // 残り何秒で警告するか
+  chargeSeconds: 3.5,      // 充電時間
+  hoverHeight: 2.0,        // 離陸後のホバリング高さ
+  maxAltitude: 7.0,        // 天井（これ以上は上がれない）
+  vSpeed: 3.2,             // 上下最高速度 m/s
+  hSpeed: 4.6,             // 水平最高速度 m/s
+  yawSpeed: 2.4,           // 回転速度 rad/s
+  accel: 4.0,              // 追従の強さ（大きいほどキビキビ）
+  pickDist: 1.35,          // 荷物をつかめる距離（水平）
+  pickSpeed: 1.25,         // これより遅いとつかめる/置ける
+  padDist: 1.35,           // 納品場所の判定距離
+  landDist: 1.5,           // スタートパッド着陸判定距離
+  landAlt: 1.1,            // 着陸判定の高さ
+};
+
+// ---------- 状態管理 ----------
+const S = { TITLE:0, SIGNAL:1, TAKEOFF:2, FLYING:3, LANDING:4, CHARGING:5, CLEAR:6, OVER:7 };
+let state = S.TITLE;
+let stateTime = 0;            // 現在の状態になってからの経過秒
+let battery = CFG.flightSeconds;
+let flightsUsed = 0;
+let totalFlightTime = 0;      // リザルト用
+let forcedLanding = false;    // バッテリー切れ着陸か
+let lastWarnSec = -1;
+let courseIndex = Math.floor(Math.random() * 3); // 開始コースはランダム
+let wrongToastCool = 0;
+
+// ---------- Three.js 基本セットアップ ----------
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe3ff);
+scene.fog = new THREE.Fog(0xbfe3ff, 30, 70);
+
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth/window.innerHeight, 0.1, 200);
+let viewMode = 0; // 0=三人称 1=一人称(FPV)
+
+// ライティング（屋内風のあかるい光）
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899bb, 0.9));
+const sun = new THREE.DirectionalLight(0xfff4d6, 1.1);
+sun.position.set(10, 18, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -16; sun.shadow.camera.right = 16;
+sun.shadow.camera.top = 16;  sun.shadow.camera.bottom = -16;
+scene.add(sun);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- 物理ワールド ----------
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+world.defaultContactMaterial.restitution = 0.35; // 障害物に当たると軽くバウンド
+world.defaultContactMaterial.friction = 0.2;
+
+// 床
+const groundBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane() });
+groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+world.addBody(groundBody);
+
+// ---------- ドローン本体 ----------
+const drone = new THREE.Group();
+{
+  const bodyMat = new THREE.MeshStandardMaterial({ color:0xffb63b, roughness:0.5 });
+  const armMat  = new THREE.MeshStandardMaterial({ color:0x3a4a70, roughness:0.6 });
+  const core = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.42), bodyMat);
+  core.castShadow = true;
+  drone.add(core);
+  // カメラ風の前面パーツ（前方向 -Z を分かりやすく）
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), new THREE.MeshStandardMaterial({ color:0x223, roughness:0.2 }));
+  eye.position.set(0, 0, -0.24);
+  drone.add(eye);
+  // アーム＆プロペラ ×4
+  drone.userData.props = [];
+  const offs = [[-0.32,-0.32],[0.32,-0.32],[-0.32,0.32],[0.32,0.32]];
+  for (const [x,z] of offs) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.08), armMat);
+    arm.position.set(x*0.55, 0, z*0.55);
+    arm.lookAt(new THREE.Vector3(x, 0, z).multiplyScalar(2));
+    drone.add(arm);
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.02, 0.06),
+      new THREE.MeshStandardMaterial({ color:0xdddddd, transparent:true, opacity:0.85 }));
+    prop.position.set(x, 0.09, z);
+    prop.castShadow = true;
+    drone.add(prop);
+    drone.userData.props.push(prop);
+  }
+  // 脚
+  for (const sx of [-1,1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.4), armMat);
+    leg.position.set(sx*0.18, -0.16, 0);
+    drone.add(leg);
+  }
+}
+scene.add(drone);
+
+const droneBody = new CANNON.Body({
+  mass: 1,
+  shape: new CANNON.Sphere(0.36),
+  linearDamping: 0.45,
+});
+droneBody.fixedRotation = true;      // 転がらないように（回転はヨーのみ手動制御）
+droneBody.updateMassProperties();
+world.addBody(droneBody);
+let yaw = 0; // 機体の向き（ラジアン）
+
+// ---------- コース定義（3パターン） ----------
+// box: [x, z, 幅, 高さ, 奥行, 色] / pkg: 荷物位置 / pad: 納品位置 / start: スタートパッド
+const COURSES = [
+  { // コース1：きょうしつ
+    name: 'きょうしつ',
+    floor: 0x9fd48a, wall: 0xf2e6c8,
+    boxes: [
+      // 机の島
+      [-5, -4, 2.4, 1.0, 1.6, 0xd9a86a], [-1.5, -4, 2.4, 1.0, 1.6, 0xd9a86a],
+      [-5,  0, 2.4, 1.0, 1.6, 0xd9a86a], [-1.5,  0, 2.4, 1.0, 1.6, 0xd9a86a],
+      // 大きな棚
+      [5, -6, 5.0, 3.2, 1.0, 0x8f7a5c],
+      [8,  2, 1.0, 3.2, 6.0, 0x8f7a5c],
+      // ブロック
+      [2, 5, 1.4, 2.2, 1.4, 0x6ab7d9], [-6, 6, 1.4, 1.4, 1.4, 0xd96a9a],
+      // まんなかの仕切り壁（下をくぐるか上をこえる）
+      [0, 2, 7.0, 1.6, 0.4, 0xc9c2e8],
+    ],
+    start: [0, -9],
+    pkgs:  [ [-8, -8], [8, 8] ],
+    pads:  [ [8, -3],  [-8, 3] ],
+  },
+  { // コース2：そうこ
+    name: 'そうこ',
+    floor: 0xb8c4cf, wall: 0xd8dde4,
+    boxes: [
+      // 棚の列
+      [-6, -3, 1.2, 3.6, 7.0, 0x7a8ba0], [0, 1, 1.2, 3.6, 7.0, 0x7a8ba0], [6, -3, 1.2, 3.6, 7.0, 0x7a8ba0],
+      // 積み上げコンテナ
+      [-3, 7, 2.0, 1.2, 2.0, 0xe0a04a], [-3, 7.02, 1.4, 2.4, 1.4, 0xd9d24a],
+      [3, -8, 2.0, 1.4, 2.0, 0x4ad9a0],
+      [8, 6, 2.4, 2.6, 2.4, 0xa04ae0],
+      // ひくいゲート
+      [3, 4, 4.0, 0.4, 0.5, 0xcccccc],
+    ],
+    start: [-9, -9],
+    pkgs:  [ [9, -9], [-9, 9] ],
+    pads:  [ [9, 9],  [0, -6] ],
+  },
+  { // コース3：リビング
+    name: 'リビング',
+    floor: 0xe8cfa8, wall: 0xf7efdf,
+    boxes: [
+      // ソファ
+      [-6, 2, 4.0, 1.1, 1.6, 0x6a8fd9], [-6, 3.2, 4.0, 1.8, 0.5, 0x6a8fd9],
+      // テーブル
+      [0, 0, 3.0, 0.9, 1.8, 0xb08050],
+      // テレビ台と本棚
+      [6, -6, 4.0, 0.8, 1.0, 0x555b66], [6, -6, 3.0, 2.6, 0.3, 0x333844],
+      [-8, -5, 1.0, 3.0, 4.0, 0x9a7a50],
+      // 観葉植物ふうブロック
+      [8, 3, 1.0, 2.4, 1.0, 0x3f9a4f], [3, 7, 1.0, 1.8, 1.0, 0x3f9a4f],
+      // 仕切りカウンター
+      [-1, -6, 6.0, 1.3, 0.5, 0xd9c2a0],
+    ],
+    start: [9, 9],
+    pkgs:  [ [-9, -9], [0, 9] ],
+    pads:  [ [-9, 8], [9, -2] ],
+  },
+];
+
+const AREA = 12;              // 部屋の半径（壁の位置）
+const courseObjects = [];     // コース削除用（mesh & body）
+let packages = [];            // 荷物データ
+let startPad = null;          // スタートパッドのメッシュ
+let startPos = new THREE.Vector3();
+let heldPkg = null;           // いま持っている荷物
+
+const PKG_COLORS = [
+  { hex:0xff4b4b, css:'#ff4b4b', name:'赤' },
+  { hex:0x3b7dff, css:'#3b7dff', name:'青' },
+];
+
+function addStaticBox(x, y, z, w, h, d, color, receiveShadow=true) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color, roughness:0.8 }));
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true; mesh.receiveShadow = receiveShadow;
+  scene.add(mesh);
+  const body = new CANNON.Body({ type: CANNON.Body.STATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2)) });
+  body.position.set(x, y, z);
+  world.addBody(body);
+  courseObjects.push({ mesh, body });
+  return mesh;
+}
+
+function buildCourse(idx) {
+  // 前のコースを片付ける
+  for (const o of courseObjects) {
+    if (o.mesh) scene.remove(o.mesh);
+    if (o.body) world.removeBody(o.body);
+  }
+  courseObjects.length = 0;
+  packages = [];
+  heldPkg = null;
+
+  const C = COURSES[idx % COURSES.length];
+
+  // 床
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(AREA*2, AREA*2),
+    new THREE.MeshStandardMaterial({ color:C.floor, roughness:0.95 }));
+  floor.rotation.x = -Math.PI/2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+  courseObjects.push({ mesh: floor });
+
+  // 床のグリッド線（距離感をつかみやすく）
+  const grid = new THREE.GridHelper(AREA*2, 12, 0xffffff, 0xffffff);
+  grid.material.opacity = 0.15; grid.material.transparent = true;
+  grid.position.y = 0.01;
+  scene.add(grid);
+  courseObjects.push({ mesh: grid });
+
+  // 四方の壁
+  const wallH = 6;
+  addStaticBox(0, wallH/2, -AREA, AREA*2, wallH, 0.5, C.wall);
+  addStaticBox(0, wallH/2,  AREA, AREA*2, wallH, 0.5, C.wall);
+  addStaticBox(-AREA, wallH/2, 0, 0.5, wallH, AREA*2, C.wall);
+  addStaticBox( AREA, wallH/2, 0, 0.5, wallH, AREA*2, C.wall);
+
+  // 障害物
+  for (const [x, z, w, h, d, col] of C.boxes) addStaticBox(x, h/2, z, w, h, d, col);
+
+  // スタートパッド（充電ステーション）
+  startPos.set(C.start[0], 0, C.start[1]);
+  startPad = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.08, 32),
+    new THREE.MeshStandardMaterial({ color:0xffd94d, emissive:0xffd94d, emissiveIntensity:0.4, roughness:0.5 }));
+  startPad.position.set(startPos.x, 0.04, startPos.z);
+  startPad.receiveShadow = true;
+  scene.add(startPad);
+  courseObjects.push({ mesh: startPad });
+  // 「H」マーク風のリング
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.25, 32),
+    new THREE.MeshBasicMaterial({ color:0xffffff, side:THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI/2; ring.position.set(startPos.x, 0.09, startPos.z);
+  scene.add(ring);
+  courseObjects.push({ mesh: ring });
+
+  // 荷物と納品パッド（2色）
+  for (let i = 0; i < 2; i++) {
+    const col = PKG_COLORS[i];
+    // 荷物
+    const pkgMesh = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55),
+      new THREE.MeshStandardMaterial({ color:col.hex, emissive:col.hex, emissiveIntensity:0.4, roughness:0.4 }));
+    pkgMesh.position.set(C.pkgs[i][0], 0.28, C.pkgs[i][1]);
+    pkgMesh.castShadow = true;
+    scene.add(pkgMesh);
+    courseObjects.push({ mesh: pkgMesh });
+    // 納品パッド
+    const padMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.35, 0.08, 32),
+      new THREE.MeshStandardMaterial({ color:col.hex, emissive:col.hex, emissiveIntensity:0.5, roughness:0.5 }));
+    padMesh.position.set(C.pads[i][0], 0.04, C.pads[i][1]);
+    padMesh.receiveShadow = true;
+    scene.add(padMesh);
+    courseObjects.push({ mesh: padMesh });
+
+    packages.push({
+      color: col, mesh: pkgMesh, pad: padMesh,
+      state: 'idle',   // idle | held | delivered
+      home: new THREE.Vector3(C.pkgs[i][0], 0.28, C.pkgs[i][1]),
+      padPos: new THREE.Vector3(C.pads[i][0], 0, C.pads[i][1]),
+    });
+  }
+
+  // ドローンをスタート位置へ
+  droneBody.position.set(startPos.x, 0.35, startPos.z);
+  droneBody.velocity.setZero();
+  yaw = Math.atan2(-(0 - startPos.x), -(0 - startPos.z)); // 部屋の中央を向く
+}
+
+// ---------- Web Audio（全効果音を合成） ----------
+let AC = null, masterGain = null;
+let propNodes = null; // プロペラ音（ノイズ+ハム）
+
+function initAudio() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = AC.createGain();
+  masterGain.gain.value = 0.8;
+  masterGain.connect(AC.destination);
+}
+
+function beep(freq, dur=0.12, type='square', gain=0.14, when=0) {
+  if (!AC) return;
+  const t = AC.currentTime + when;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(masterGain);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+
+function sweep(f1, f2, dur=0.5, type='sawtooth', gain=0.12) {
+  if (!AC) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f1, t);
+  o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(masterGain);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+
+function startProp() {
+  if (!AC || propNodes) return;
+  // ホワイトノイズ → バンドパス（風切り音）
+  const len = AC.sampleRate;
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random()*2 - 1;
+  const noise = AC.createBufferSource();
+  noise.buffer = buf; noise.loop = true;
+  const bp = AC.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 300; bp.Q.value = 0.8;
+  const nGain = AC.createGain(); nGain.gain.value = 0.05;
+  noise.connect(bp).connect(nGain).connect(masterGain);
+  noise.start();
+  // モーターのハム音
+  const hum = AC.createOscillator();
+  hum.type = 'sawtooth'; hum.frequency.value = 70;
+  const hGain = AC.createGain(); hGain.gain.value = 0.045;
+  hum.connect(hGain).connect(masterGain);
+  hum.start();
+  propNodes = { noise, bp, nGain, hum, hGain };
+}
+
+function updateProp(throttle01, speed01) {
+  if (!propNodes || !AC) return;
+  const t = AC.currentTime;
+  propNodes.hum.frequency.setTargetAtTime(65 + throttle01*55 + speed01*25, t, 0.08);
+  propNodes.bp.frequency.setTargetAtTime(250 + throttle01*350 + speed01*200, t, 0.08);
+  propNodes.nGain.gain.setTargetAtTime(0.04 + speed01*0.03, t, 0.1);
+}
+
+function stopProp() {
+  if (!propNodes) return;
+  try { propNodes.noise.stop(); propNodes.hum.stop(); } catch(e) {}
+  propNodes = null;
+}
+
+const SND = {
+  signalRed:  () => beep(440, 0.18, 'square', 0.12),
+  signalGo:   () => beep(880, 0.4,  'square', 0.16),
+  takeoff:    () => sweep(150, 700, 0.9, 'sawtooth', 0.1),
+  pickup:     () => { beep(660, 0.1, 'sine', 0.18); beep(990, 0.14, 'sine', 0.18, 0.1); },
+  deliver:    () => { beep(660,0.12,'triangle',0.2); beep(830,0.12,'triangle',0.2,0.12); beep(1100,0.25,'triangle',0.2,0.24); },
+  wrong:      () => { beep(160, 0.22, 'square', 0.16); beep(120, 0.25, 'square', 0.14, 0.1); },
+  warn:       () => beep(1200, 0.09, 'square', 0.12),
+  land:       () => sweep(300, 90, 0.4, 'sine', 0.2),
+  chargeBlip: (i) => beep(500 + i*90, 0.08, 'sine', 0.1),
+  fanfare:    () => {
+    const notes = [523, 659, 784, 1046, 784, 1046, 1318];
+    notes.forEach((f, i) => { beep(f, 0.22, 'triangle', 0.2, i*0.16); beep(f/2, 0.22, 'square', 0.08, i*0.16); });
+  },
+  over:       () => { sweep(400, 120, 1.2, 'sawtooth', 0.12); },
+};
+
+// ---------- 仮想スティック（マルチタッチ対応） ----------
+// 値は -1〜1。y は「上に倒すと +1」
+function makeStick(zoneEl, knobEl) {
+  const st = { x:0, y:0, touchId:null, zoneEl, knobEl };
+  const R = 60; // ノブの最大移動半径(px)
+
+  function setFromEvent(clientX, clientY) {
+    const rect = zoneEl.getBoundingClientRect();
+    const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+    let dx = clientX - cx, dy = clientY - cy;
+    const len = Math.hypot(dx, dy);
+    if (len > R) { dx *= R/len; dy *= R/len; }
+    st.x = dx / R;
+    st.y = -dy / R; // 画面上方向が +1
+    knobEl.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+  function reset() {
+    st.x = 0; st.y = 0; st.touchId = null;
+    knobEl.style.transform = 'translate(0px, 0px)';
+  }
+
+  zoneEl.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (st.touchId !== null) return;
+    const t = e.changedTouches[0];
+    st.touchId = t.identifier;
+    setFromEvent(t.clientX, t.clientY);
+  }, { passive:false });
+
+  // move / end は document で拾う（ゾーン外に指が出ても追従）
+  document.addEventListener('touchmove', (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === st.touchId) setFromEvent(t.clientX, t.clientY);
+    }
+  }, { passive:false });
+  document.addEventListener('touchend', (e) => {
+    for (const t of e.changedTouches) if (t.identifier === st.touchId) reset();
+  });
+  document.addEventListener('touchcancel', (e) => {
+    for (const t of e.changedTouches) if (t.identifier === st.touchId) reset();
+  });
+
+  // マウスでも一応動くように（PC確認用）
+  zoneEl.addEventListener('mousedown', (e) => {
+    st.touchId = 'mouse';
+    setFromEvent(e.clientX, e.clientY);
+    const mv = (ev) => { if (st.touchId === 'mouse') setFromEvent(ev.clientX, ev.clientY); };
+    const up = () => { reset(); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+
+  st.reset = reset;
+  return st;
+}
+
+const stickL = makeStick(document.getElementById('stickL'), document.getElementById('knobL'));
+const stickR = makeStick(document.getElementById('stickR'), document.getElementById('knobR'));
+
+// ---------- iPad Safariのジェスチャー無効化 ----------
+document.addEventListener('touchmove', (e) => e.preventDefault(), { passive:false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  // ダブルタップ拡大防止（ボタン類はclickで動くのでOK）
+  const now = Date.now();
+  if (now - lastTouchEnd < 350) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive:false });
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('gesturechange', (e) => e.preventDefault());
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ---------- UI要素 ----------
+const $ = (id) => document.getElementById(id);
+const hud = $('hud'), viewBtn = $('viewBtn');
+const battWrap = $('battWrap'), battFill = $('battFill'), battSec = $('battSec');
+const flightDots = $('flightDots'), cargoChip = $('cargoChip'), cargoName = $('cargoName');
+const toastEl = $('toast');
+
+function showToast(msg, isInfo=false, dur=1200) {
+  toastEl.textContent = msg;
+  toastEl.className = isInfo ? 'info' : '';
+  toastEl.style.display = 'block';
+  clearTimeout(toastEl._t);
+  toastEl._t = setTimeout(() => toastEl.style.display = 'none', dur);
+}
+
+function setPlayUI(on) {
+  hud.style.display = on ? 'flex' : 'none';
+  viewBtn.style.display = on ? 'flex' : 'none';
+  $('stickL').style.display = on ? 'block' : 'none';
+  $('stickR').style.display = on ? 'block' : 'none';
+}
+
+function updateHUD() {
+  const pct = Math.max(0, battery / CFG.flightSeconds) * 100;
+  battFill.style.width = pct + '%';
+  battSec.textContent = Math.ceil(Math.max(0, battery));
+  battWrap.classList.toggle('warn', state === S.FLYING && battery <= CFG.warnAt);
+  const left = CFG.maxFlights - flightsUsed;
+  flightDots.textContent = '●'.repeat(Math.max(0,left)) + '○'.repeat(Math.min(CFG.maxFlights, flightsUsed));
+  if (heldPkg) {
+    cargoChip.style.background = heldPkg.color.css;
+    cargoName.textContent = heldPkg.color.name + 'の荷物';
+  } else {
+    cargoChip.style.background = '#666';
+    cargoName.textContent = 'なし';
+  }
+}
+
+viewBtn.addEventListener('click', () => {
+  viewMode = 1 - viewMode;
+  viewBtn.textContent = viewMode === 0 ? '📷 三人称' : '📷 一人称';
+});
+
+// ---------- 状態遷移 ----------
+function setState(s) { state = s; stateTime = 0; }
+
+function startSignal() {
+  setState(S.SIGNAL);
+  setPlayUI(true);
+  stickL.reset(); stickR.reset();
+  const ov = $('signalOverlay');
+  ov.style.display = 'flex';
+  const r = $('lampR'), y = $('lampY'), g = $('lampG');
+  r.classList.remove('on'); y.classList.remove('on'); g.classList.remove('on');
+  setTimeout(() => { r.classList.add('on'); SND.signalRed(); }, 200);
+  setTimeout(() => { y.classList.add('on'); SND.signalRed(); }, 900);
+  setTimeout(() => {
+    r.classList.remove('on'); y.classList.remove('on');
+    g.classList.add('on'); SND.signalGo();
+  }, 1600);
+  setTimeout(() => {
+    ov.style.display = 'none';
+    beginTakeoff();
+  }, 2300);
+}
+
+function beginTakeoff() {
+  flightsUsed++;
+  battery = CFG.flightSeconds;
+  lastWarnSec = -1;
+  forcedLanding = false;
+  setState(S.TAKEOFF);
+  startProp();
+  SND.takeoff();
+  updateHUD();
+}
+
+function beginLanding(forced) {
+  forcedLanding = forced;
+  setState(S.LANDING);
+  stickL.reset(); stickR.reset();
+  if (forced) showToast('バッテリー切れ！自動着陸します', true, 1800);
+}
+
+function onLanded() {
+  SND.land();
+  stopProp();
+  const atStart = horizDistTo(startPos) < CFG.landDist;
+  const allDelivered = packages.every(p => p.state === 'delivered');
+
+  if (atStart && allDelivered) { doClear(); return; }
+  if (flightsUsed >= CFG.maxFlights) { doGameOver(); return; }
+  // 充電シーケンスへ
+  setState(S.CHARGING);
+  $('chargeOverlay').style.display = 'flex';
+  $('chargeBarFill').style.width = '0%';
+}
+
+function doClear() {
+  setState(S.CLEAR);
+  setPlayUI(false);
+  SND.fanfare();
+  spawnConfetti();
+  $('resFlights').textContent = flightsUsed;
+  const m = Math.floor(totalFlightTime / 60), s = Math.floor(totalFlightTime % 60);
+  $('resTime').textContent = `${m}分${String(s).padStart(2,'0')}秒`;
+  $('clearOverlay').style.display = 'flex';
+}
+
+function doGameOver() {
+  setState(S.OVER);
+  setPlayUI(false);
+  SND.over();
+  $('overOverlay').style.display = 'flex';
+}
+
+function resetGame(nextCourse) {
+  if (nextCourse) courseIndex = (courseIndex + 1) % COURSES.length;
+  flightsUsed = 0;
+  totalFlightTime = 0;
+  battery = CFG.flightSeconds;
+  buildCourse(courseIndex);
+  clearConfetti();
+  updateHUD();
+}
+
+$('startBtn').addEventListener('click', () => {
+  initAudio();
+  if (AC.state === 'suspended') AC.resume();
+  $('startScreen').style.display = 'none';
+  resetGame(false);
+  startSignal();
+});
+$('againBtn').addEventListener('click', () => {
+  $('clearOverlay').style.display = 'none';
+  resetGame(true);   // 次は別コース
+  startSignal();
+});
+$('retryBtn').addEventListener('click', () => {
+  $('overOverlay').style.display = 'none';
+  resetGame(false);  // 同じコースで再挑戦
+  startSignal();
+});
+
+// ---------- 荷物のロジック ----------
+function horizDistTo(pos) {
+  const dx = droneBody.position.x - pos.x;
+  const dz = droneBody.position.z - pos.z;
+  return Math.hypot(dx, dz);
+}
+
+function droneSpeed() {
+  const v = droneBody.velocity;
+  return Math.hypot(v.x, v.y, v.z);
+}
+
+function checkPackages(dt) {
+  wrongToastCool = Math.max(0, wrongToastCool - dt);
+  const slow = droneSpeed() < CFG.pickSpeed;
+
+  if (!heldPkg) {
+    // ピックアップ判定：近く＆ゆっくり
+    for (const p of packages) {
+      if (p.state !== 'idle') continue;
+      if (horizDistTo(p.home) < CFG.pickDist && droneBody.position.y < 3.2 && slow) {
+        p.state = 'held';
+        heldPkg = p;
+        SND.pickup();
+        showToast(`${p.color.name}の荷物をつかんだ！`, true, 1000);
+        updateHUD();
+        break;
+      }
+    }
+  } else {
+    // リリース判定
+    const p = heldPkg;
+    const nearMy = horizDistTo(p.padPos) < CFG.padDist;
+    if (nearMy && slow && droneBody.position.y < 3.2) {
+      p.state = 'delivered';
+      p.mesh.position.set(p.padPos.x, 0.36, p.padPos.z);
+      p.mesh.rotation.set(0, 0, 0);
+      heldPkg = null;
+      SND.deliver();
+      showToast(`${p.color.name}の荷物をとどけた！ 🎉`, true, 1200);
+      updateHUD();
+      const rest = packages.filter(q => q.state !== 'delivered').length;
+      if (rest === 0) setTimeout(() => showToast('スタート地点にもどって着陸しよう！', true, 2200), 1300);
+    } else {
+      // ちがう色のパッドの上でゆっくりしている → 置けないフィードバック
+      for (const q of packages) {
+        if (q === p) continue;
+        if (horizDistTo(q.padPos) < CFG.padDist && slow && wrongToastCool <= 0) {
+          showToast('❌ 色がちがうよ！');
+          SND.wrong();
+          wrongToastCool = 1.6;
+        }
+      }
+    }
+  }
+
+  // 持っている荷物をドローンの下に追従表示
+  if (heldPkg) {
+    const m = heldPkg.mesh;
+    m.position.set(droneBody.position.x, droneBody.position.y - 0.55, droneBody.position.z);
+    m.rotation.y = yaw;
+  }
+}
+
+// ---------- 紙吹雪（クリア演出） ----------
+let confetti = null;
+function spawnConfetti() {
+  clearConfetti();
+  const N = 350;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(N*3), col = new Float32Array(N*3);
+  const vel = [];
+  const palette = [0xff4b4b, 0xffd94d, 0x4bff7a, 0x4bc8ff, 0xff7ac8, 0xffffff];
+  const c = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    pos[i*3]   = droneBody.position.x + (Math.random()-0.5)*2;
+    pos[i*3+1] = droneBody.position.y + 1 + Math.random()*2;
+    pos[i*3+2] = droneBody.position.z + (Math.random()-0.5)*2;
+    c.setHex(palette[Math.floor(Math.random()*palette.length)]);
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+    vel.push(new THREE.Vector3((Math.random()-0.5)*7, 4 + Math.random()*7, (Math.random()-0.5)*7));
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({ size:0.16, vertexColors:true });
+  confetti = { points: new THREE.Points(geo, mat), vel };
+  scene.add(confetti.points);
+}
+function clearConfetti() {
+  if (confetti) { scene.remove(confetti.points); confetti.points.geometry.dispose(); confetti = null; }
+}
+function updateConfetti(dt) {
+  if (!confetti) return;
+  const pos = confetti.points.geometry.attributes.position;
+  for (let i = 0; i < confetti.vel.length; i++) {
+    const v = confetti.vel[i];
+    v.y -= 9.8 * dt * 0.6; // ふわっと落ちる
+    pos.array[i*3]   += v.x * dt;
+    pos.array[i*3+1] += v.y * dt;
+    pos.array[i*3+2] += v.z * dt;
+    if (pos.array[i*3+1] < 0.05) { pos.array[i*3+1] = 0.05; v.set(0,0,0); }
+  }
+  pos.needsUpdate = true;
+}
+
+// ---------- ドローンの制御 ----------
+const tmpV = new THREE.Vector3();
+
+function controlDrone(dt) {
+  const p = droneBody.position, v = droneBody.velocity;
+  let tvx = 0, tvy = 0, tvz = 0; // 目標速度（ワールド座標）
+
+  if (state === S.TAKEOFF) {
+    // 自動でふわっと上昇（操作不可）
+    tvy = THREE.MathUtils.clamp((CFG.hoverHeight - p.y) * 2.2, -1, 2.2);
+    if (stateTime > 1.2 && Math.abs(p.y - CFG.hoverHeight) < 0.35) {
+      setState(S.FLYING);
+    }
+  } else if (state === S.FLYING) {
+    // ヨー（左スティック横）
+    yaw += -stickL.x * CFG.yawSpeed * dt;
+    // スロットル（左スティック縦）→ 目標上下速度。中央でホバリング維持
+    tvy = stickL.y * CFG.vSpeed;
+    if (p.y > CFG.maxAltitude) tvy = Math.min(tvy, 0);           // 天井
+    if (p.y < 0.6 && stickL.y < 0) tvy = Math.max(tvy, -0.8);    // 地面近くはゆっくり
+    // 前後左右（右スティック）→ 機体の向き基準で移動
+    const lx = stickR.x * CFG.hSpeed;   // ロール（右+）
+    const lz = -stickR.y * CFG.hSpeed;  // ピッチ（上に倒すと前 = -Z）
+    tvx = lx * Math.cos(yaw) + lz * Math.sin(yaw);
+    tvz = -lx * Math.sin(yaw) + lz * Math.cos(yaw);
+  } else if (state === S.LANDING) {
+    // ゆっくり降下、水平はブレーキ
+    tvy = -1.3;
+    if (p.y < 0.5 && Math.abs(v.y) < 1.5 && stateTime > 0.4) {
+      droneBody.velocity.set(0, 0, 0);
+      onLanded();
+      return;
+    }
+  } else {
+    // 地上待機（充電・信号中など）：完全停止
+    droneBody.velocity.set(0, 0, 0);
+    droneBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), yaw);
+    return;
+  }
+
+  // 目標速度に追従する力（重力を打ち消すホバー力込み）
+  const m = droneBody.mass;
+  const fx = (tvx - v.x) * CFG.accel * m;
+  const fy = (tvy - v.y) * CFG.accel * m + 9.82 * m;
+  const fz = (tvz - v.z) * CFG.accel * m;
+  droneBody.applyForce(new CANNON.Vec3(fx, fy, fz));
+  droneBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), yaw);
+}
+
+function syncDroneVisual(dt) {
+  drone.position.copy(droneBody.position);
+  // 見た目の傾き：進行方向の速度から算出（機体ローカル）
+  const v = droneBody.velocity;
+  const localZ =  v.x * Math.sin(-yaw) + v.z * Math.cos(-yaw); // 前後
+  const localX =  v.x * Math.cos(-yaw) - v.z * Math.sin(-yaw); // 左右
+  const tiltX = THREE.MathUtils.clamp(localZ * 0.07, -0.4, 0.4);
+  const tiltZ = THREE.MathUtils.clamp(-localX * 0.07, -0.4, 0.4);
+  drone.rotation.set(0, yaw, 0);
+  drone.rotateX(tiltX);
+  drone.rotateZ(tiltZ);
+  // プロペラ回転（飛行中は高速）
+  const flying = (state === S.TAKEOFF || state === S.FLYING || state === S.LANDING);
+  const spin = flying ? 40 : 0;
+  for (const prop of drone.userData.props) prop.rotation.y += spin * dt;
+}
+
+// ---------- カメラ ----------
+const camTarget = new THREE.Vector3();
+function updateCamera(dt) {
+  if (viewMode === 0) {
+    // 三人称：機体後方から追従
+    const back = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)); // 後方 = +Z(local)
+    const desired = tmpV.set(
+      droneBody.position.x + back.x * 4.6,
+      droneBody.position.y + 2.4,
+      droneBody.position.z + back.z * 4.6
+    );
+    const k = 1 - Math.exp(-6 * dt); // フレームレート非依存の追従
+    camera.position.lerp(desired, k);
+    camTarget.lerp(new THREE.Vector3().copy(droneBody.position).add(new THREE.Vector3(0, 0.4, 0)), 1 - Math.exp(-10*dt));
+    camera.lookAt(camTarget);
+  } else {
+    // 一人称（FPV）：機体搭載カメラ
+    const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    camera.position.set(
+      droneBody.position.x + fwd.x * 0.3,
+      droneBody.position.y + 0.12,
+      droneBody.position.z + fwd.z * 0.3
+    );
+    camera.lookAt(
+      camera.position.x + fwd.x * 10,
+      camera.position.y - 1.2,       // 少し下を向く（荷物が見やすい）
+      camera.position.z + fwd.z * 10
+    );
+  }
+}
+
+// ---------- メインループ ----------
+const clock = new THREE.Clock();
+let chargeBlipCount = 0;
+
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock.getDelta(), 1/30); // 大きすぎるdtをクランプ（120Hz/フレーム落ち両対応）
+  stateTime += dt;
+
+  // --- 状態ごとの処理 ---
+  if (state === S.FLYING) {
+    battery -= dt;
+    totalFlightTime += dt;
+    // 残り時間警告
+    const sec = Math.ceil(battery);
+    if (battery <= CFG.warnAt && sec !== lastWarnSec && battery > 0) {
+      lastWarnSec = sec;
+      SND.warn();
+    }
+    if (battery <= 0) { battery = 0; beginLanding(true); }
+    else {
+      checkPackages(dt);
+      // スタートパッドで低空・低速 → 自主着陸
+      if (horizDistTo(startPos) < CFG.landDist &&
+          droneBody.position.y < CFG.landAlt &&
+          droneSpeed() < 1.0 && stateTime > 2.0) {
+        beginLanding(false);
+      }
+    }
+    updateHUD();
+  } else if (state === S.CHARGING) {
+    const t01 = Math.min(1, stateTime / CFG.chargeSeconds);
+    $('chargeBarFill').style.width = (t01*100).toFixed(0) + '%';
+    const blip = Math.floor(stateTime / 0.45);
+    if (blip !== chargeBlipCount) { chargeBlipCount = blip; SND.chargeBlip(blip % 6); }
+    if (t01 >= 1) {
+      $('chargeOverlay').style.display = 'none';
+      battery = CFG.flightSeconds;
+      updateHUD();
+      startSignal();
+    }
+  } else if (state === S.TAKEOFF || state === S.LANDING) {
+    checkPackages(dt); // 持っている荷物の追従表示のため
+  }
+
+  // --- 物理と制御 ---
+  controlDrone(dt);
+  world.step(1/60, dt, 4);
+  syncDroneVisual(dt);
+
+  // プロペラ音の更新
+  if (propNodes) {
+    const th = state === S.FLYING ? Math.abs(stickL.y) : 0.5;
+    const sp = Math.min(1, droneSpeed() / CFG.hSpeed);
+    updateProp(th, sp);
+  }
+
+  // 荷物・パッドの発光アニメーション
+  const tt = clock.elapsedTime;
+  for (const p of packages) {
+    if (p.state === 'idle') {
+      p.mesh.material.emissiveIntensity = 0.35 + 0.35 * Math.sin(tt*4);
+      p.mesh.position.y = 0.28 + 0.06 * Math.sin(tt*2.5);
+      p.mesh.rotation.y += dt * 0.8;
+    }
+    p.pad.material.emissiveIntensity = 0.35 + 0.3 * Math.sin(tt*3 + 1);
+  }
+  if (startPad) startPad.material.emissiveIntensity = 0.3 + 0.25 * Math.sin(tt*3);
+
+  updateConfetti(dt);
+  updateCamera(dt);
+  renderer.render(scene, camera);
+}
+
+// 初期コースを構築して開始
+buildCourse(courseIndex);
+updateHUD();
+loop();
+</script>
+</body>
+</html>
